@@ -1,8 +1,11 @@
 #!/usr/bin/env ruby
 
-require 'optparse'
 require 'rubygems'
+require 'optparse'
 require 'mechanize'
+require 'yaml'
+
+SETTINGS_FILE = '.provpro'
 
 class ProvPro
 
@@ -31,8 +34,6 @@ class ProvPro
         form["theAccountPW"]   = @password
       end.submit
      
-      # TODO Check for invalid credentials
-    
       # After a succesful login we need to touch the login page again to establish a session
       # If we find the login form on this page, the login was not succesful
        if not @agent.get(login_url).forms.find { |f| f.name == form_name }.nil?
@@ -52,10 +53,24 @@ class ProvPro
     p page
   end
 
+  def error_usage(error)
+    STDERR << "Error: "
+    STDERR << error
+    STDERR << "\n"
+    STDERR << @optparser.help
+    exit
+  end
+
   def initialize(args)
-    optionParser = OptionParser.new do |opts|
-      opts.banner = "Usage: provpro.rb [options] name UDID"
-    
+    settings = (YAML::load_file(SETTINGS_FILE) if File.exists?(SETTINGS_FILE)) || {}
+    @username = settings["username"]
+    @password = settings["password"]
+
+    @optparser = OptionParser.new do |opts|
+      opts.banner += " name UDID\n\n" + 
+                    "You must provide credentials, either through the command line options\n" +
+                    "or in a YAML file named '#{SETTINGS_FILE}'\n\n"
+
       opts.on("-u", "--username USERNAME", "ADC Username") do |u|
         @username = u
       end
@@ -65,22 +80,15 @@ class ProvPro
       end
     end
     
-    optionParser.parse!(args)
+    @optparser.parse!(args)
     
-    if @username.nil? || @password.nil?
-      STDERR << "Error: no username or password provided\n"
-      STDERR << optionParser.help
-    end
-
-    if args.size != 2
-      STDERR << "Error: not enough arguments\n"
-      STDERR << optionParser.help
-      exit
-    end
+    error_usage("No username or password provided") if @username.nil? || @password.nil?
+    error_usage("Not enough arguments")             if args.size != 2
     # else
     
     validate(args[0], args[1])
     
+    exit 
     @agent = WWW::Mechanize.new
     login
     add_device(args[0], args[1])
@@ -91,3 +99,6 @@ ProvPro.new(ARGV)
 
 # "etupil"
 # "e^i09uT"
+#
+# TODO
+# - Accept multiple id's from STDIN 
