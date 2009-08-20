@@ -1,5 +1,15 @@
 #!/usr/bin/env ruby
 
+# TODO
+# - Verbose option
+# - Create a new provisioning profile
+#   - Look up the right app id
+#   - Register which devices were added
+#   - Find the provisioning profile 
+#   - Check the new device
+#   - Wait for the new profile to be generated
+#   - Download the profile
+
 require 'rubygems'
 require 'optparse'
 require 'mechanize'
