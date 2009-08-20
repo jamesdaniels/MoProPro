@@ -11,13 +11,13 @@ class ProvPro
 
   # Since the website only uses JavaScript for validation(!), we need do this
   # ourselves
-  def validate(name, udid)
+  def validate(udid, name)
     if not name =~ /[\w\d ]+/
-      puts "Error: name can only contain alphanumeric characters and spaces"
+      puts "Error: name can only contain alphanumeric characters and spaces (but is: '#{name}')"
       exit
     end
     if not udid =~ /[a-fA-F\d]{40}/
-      puts "Error: UDID must be a 40 character hexadecimal string"
+      puts "Error: UDID must be a 40 character hexadecimal string (but is: '#{udid}')"
       exit
     end
   end
@@ -43,11 +43,15 @@ class ProvPro
     end
   end
 
-  def add_device(name, udid)
+  def add_devices(devices)
     add_device_page = @agent.get("https://developer.apple.com/iphone/manage/devices/add.action")
     page = add_device_page.form_with(:name => "save") do |form|
-      form["deviceNameList[0]"]   = name
-      form["deviceNumberList[0]"] = udid
+      index = 0
+      devices.each_pair{ |udid, name|
+        form["deviceNameList[#{index}]"]   = name
+        form["deviceNumberList[#{index}]"] = udid
+        index += 1
+      }
     end.submit
     
     p page
@@ -56,7 +60,7 @@ class ProvPro
   def error_usage(error)
     STDERR << "Error: "
     STDERR << error
-    STDERR << "\n"
+    STDERR << "\n\n"
     STDERR << @optparser.help
     exit
   end
@@ -67,9 +71,13 @@ class ProvPro
     @password = settings["password"]
 
     @optparser = OptionParser.new do |opts|
-      opts.banner += " name UDID\n\n" + 
+      opts.banner += " UDID name\n\n" + 
+
                     "You must provide credentials, either through the command line options\n" +
-                    "or in a YAML file named '#{SETTINGS_FILE}'\n\n"
+                    "or in a YAML file named '#{SETTINGS_FILE}'\n\n" +
+
+                    "You can also use stdin to provide multiple device entries\n" +
+                    "For example: 'cat devices.yml | #{opts.program_name}'\n\n"
 
       opts.on("-u", "--username USERNAME", "ADC Username") do |u|
         @username = u
@@ -83,22 +91,21 @@ class ProvPro
     @optparser.parse!(args)
     
     error_usage("No username or password provided") if @username.nil? || @password.nil?
-    error_usage("Not enough arguments")             if args.size != 2
+    error_usage("Not enough arguments")             if args.size != 2 && STDIN.tty?
     # else
+    devices = {} 
+    devices[args[0]] = args[1] if args.size == 2
+
+    if not STDIN.tty?
+      devices.merge!(YAML::load(STDIN))
+    end
+
+    devices.each_pair {|udid, name| validate(udid, name)}
     
-    validate(args[0], args[1])
-    
-    exit 
     @agent = WWW::Mechanize.new
     login
-    add_device(args[0], args[1])
+    add_devices(devices)
   end
 end
 
 ProvPro.new(ARGV)
-
-# "etupil"
-# "e^i09uT"
-#
-# TODO
-# - Accept multiple id's from STDIN 
