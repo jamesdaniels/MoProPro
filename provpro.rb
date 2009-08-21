@@ -14,6 +14,7 @@ require 'rubygems'
 require 'optparse'
 require 'mechanize'
 require 'yaml'
+require 'plist'
 
 SETTINGS_FILE = '.provpro'
 
@@ -32,7 +33,7 @@ class ProvPro
     end
   end
 
-  def login
+  def login(username, password)
     login_url = 'https://developer.apple.com/iphone/login.action'
     form_name = 'appleConnectForm'
     
@@ -40,8 +41,8 @@ class ProvPro
      
       # Submit the login form
       login_page.form_with(:name => form_name ) do |form|
-        form["theAccountName"] = @username
-        form["theAccountPW"]   = @password
+        form["theAccountName"] = username
+        form["theAccountPW"]   = password
       end.submit
      
       # After a succesful login we need to touch the login page again to establish a session
@@ -63,8 +64,56 @@ class ProvPro
         index += 1
       }
     end.submit
-    
-    p page
+  end
+
+  def modify_provisioning_profile(app_id, devices)
+    profiles_page = @agent.get("http://developer.apple.com/iphone/manage/provisioningprofiles/viewDistributionProfiles.action")
+    profiles = []
+    # Names
+    profiles_page.root.search('td.profile span').each_with_index do |span,i|
+      profiles[i] = { :name => span.content }
+    end
+    # Bundle identifiers (without seed)
+    profiles_page.root.search('td.appid').each_with_index do |appid,i| 
+      profiles[i].merge!({:app_id => appid.content.sub(/^[\w\d]+\./, '')})
+    end
+    # Edit links
+    profiles_page.links_with(:text => 'Modify').each_with_index do |link,i|
+      profiles[i].merge!({:edit_link => link})
+    end
+
+    # Try to find exact matches
+    matching_profiles = profiles.find_all do |profile|
+      profile[:app_id] == app_id
+    end
+    # Else, filter out profiles that don't match our app_id
+    matching_profiles = profiles.find_all do |profile|
+      # (Ab)use the bundle identifier as regex
+      profile[:app_id] == "*" || app_id =~ /#{profile[:app_id]}/
+    end if matching_profiles == []
+   
+    # Sort profiles, prefer ones with "Ad Hoc" in their name
+    matching_profiles.sort! do |a,b| 
+      aah = (a[:name] =~ /Ad ?Hoc/i).nil?
+      bah = (b[:name] =~ /Ad ?Hoc/i).nil?
+      return 0 if aah == bah 
+      (aah ? 1 : -1)
+    end
+
+    # Visit each of the matching profiles until we find an Ad Hoc profile
+    matching_profiles.each do |profile|
+      edit_page = @agent.click(profile[:edit_link])
+      form = edit_page.form_with(:name => "saveDistribution")
+      # Check if this is an Ad Hoc profile
+      if form.radiobutton_with(:value => "limited").checked
+        devices.each_key do |udid|
+          form.checkbox_with(:value => udid).checked = true
+        end
+        form.submit
+      end
+      # p edit_page
+    end
+
   end
 
   def error_usage(error)
@@ -77,8 +126,9 @@ class ProvPro
 
   def initialize(args)
     settings = (YAML::load_file(SETTINGS_FILE) if File.exists?(SETTINGS_FILE)) || {}
-    @username = settings["username"]
-    @password = settings["password"]
+    username = settings["username"]
+    password = settings["password"]
+    noprov    = settings["provisioning"]
 
     @optparser = OptionParser.new do |opts|
       opts.banner += " UDID name\n\n" + 
@@ -87,22 +137,31 @@ class ProvPro
                     "or in a YAML file named '#{SETTINGS_FILE}'\n\n" +
 
                     "You can also use stdin to provide multiple device entries\n" +
-                    "For example: 'cat devices.yml | #{opts.program_name}'\n\n"
+                    "For example: 'cat devices.yml | #{opts.program_name}'\n\n" +
+
+                    "This program will look for an Info.plist file in the current directory\n" +
+                    "to get the app identifier from (unless you specify --no-provisioning)\n\n"
 
       opts.on("-u", "--username USERNAME", "ADC Username") do |u|
-        @username = u
+        username = u
       end
     
       opts.on("-p", "--password PASSWORD", "ADC Password") do |p|
-        @password = p
+        password = p
+      end
+
+      opts.on("--no-provisioning", "Do not create a provisioning profile, only add devices") do |np|
+        noprov = true
       end
     end
     
     @optparser.parse!(args)
     
-    error_usage("No username or password provided") if @username.nil? || @password.nil?
+    error_usage("No username or password provided") if username.nil? || password.nil?
     error_usage("Not enough arguments")             if args.size != 2 && STDIN.tty?
+    error_usage("No Info.plist file found")         unless noprov || File.exist?('Info.plist')
     # else
+
     devices = {} 
     devices[args[0]] = args[1] if args.size == 2
 
@@ -112,9 +171,12 @@ class ProvPro
 
     devices.each_pair {|udid, name| validate(udid, name)}
     
+    app_id = Plist::parse_xml('Info.plist')["CFBundleIdentifier"] unless noprov
+
     @agent = WWW::Mechanize.new
-    login
+    login(username, password)
     add_devices(devices)
+    modify_provisioning_profile(app_id, devices) unless noprov
   end
 end
 
