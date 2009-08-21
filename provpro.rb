@@ -1,12 +1,7 @@
 #!/usr/bin/env ruby
 
 # TODO
-# - Verbose option
 # - Create a new provisioning profile
-#   - Look up the right app id
-#   - Register which devices were added
-#   - Find the provisioning profile 
-#   - Check the new device
 #   - Wait for the new profile to be generated
 #   - Download the profile
 
@@ -34,6 +29,8 @@ class ProvPro
   end
 
   def login(username, password)
+    status_start("Logging in")
+
     login_url = 'https://developer.apple.com/iphone/login.action'
     form_name = 'appleConnectForm'
     
@@ -52,9 +49,13 @@ class ProvPro
          exit
        end
     end
+
+    status_end()
   end
 
   def add_devices(devices)
+    status_start("Adding #{devices.size} device#{devices.size == 1 ? "" : "s"}")
+
     add_device_page = @agent.get("https://developer.apple.com/iphone/manage/devices/add.action")
     page = add_device_page.form_with(:name => "save") do |form|
       index = 0
@@ -64,9 +65,13 @@ class ProvPro
         index += 1
       }
     end.submit
+
+    status_end("Submitted.")
   end
 
   def modify_provisioning_profile(app_id, devices)
+    status_start("Looking up provisioning profile")
+
     profiles_page = @agent.get("http://developer.apple.com/iphone/manage/provisioningprofiles/viewDistributionProfiles.action")
     profiles = []
     # Names
@@ -82,6 +87,8 @@ class ProvPro
       profiles[i].merge!({:edit_link => link})
     end
 
+    substatus("Found #{profiles.size} profile#{profiles.size == 1 ? "" : "s"}")
+
     # Try to find exact matches
     matching_profiles = profiles.find_all do |profile|
       profile[:app_id] == app_id
@@ -91,7 +98,9 @@ class ProvPro
       # (Ab)use the bundle identifier as regex
       profile[:app_id] == "*" || app_id =~ /#{profile[:app_id]}/
     end if matching_profiles == []
-   
+  
+    substatus("Found #{matching_profiles.size} matching profile#{matching_profiles.size == 1 ? "" : "s"}")
+
     # Sort profiles, prefer ones with "Ad Hoc" in their name
     matching_profiles.sort! do |a,b| 
       aah = (a[:name] =~ /Ad ?Hoc/i).nil?
@@ -109,11 +118,14 @@ class ProvPro
         devices.each_key do |udid|
           form.checkbox_with(:value => udid).checked = true
         end
-        form.submit
+        p form
+        # form.submit
+        return # TODO
       end
       # p edit_page
     end
 
+    # TODO: Error if no matching profile was found
   end
 
   def error_usage(error)
@@ -124,11 +136,33 @@ class ProvPro
     exit
   end
 
+  def status_start(message)
+    return if not @verbose
+    STDOUT << message
+    STDOUT << "... "
+    STDOUT.flush
+  end
+
+  def status_end(message = "Ok.")
+    return if not @verbose
+    STDOUT << message
+    STDOUT << "\n"
+    STDOUT.flush
+  end
+
+  def substatus(message)
+    return if not @verbose
+    STDOUT << "\n - "
+    STDOUT << message
+    STDOUT.flush
+  end
+
   def initialize(args)
     settings = (YAML::load_file(SETTINGS_FILE) if File.exists?(SETTINGS_FILE)) || {}
     username = settings["username"]
     password = settings["password"]
-    noprov    = settings["provisioning"]
+    noprov   = settings["provisioning"]
+    @verbose = settings["verbose"]
 
     @optparser = OptionParser.new do |opts|
       opts.banner += " UDID name\n\n" + 
@@ -153,6 +187,10 @@ class ProvPro
       opts.on("--no-provisioning", "Do not create a provisioning profile, only add devices") do |np|
         noprov = true
       end
+      
+      opts.on("-v", "--verbose", "Be verbose") do |v|
+        @verbose = true
+      end
     end
     
     @optparser.parse!(args)
@@ -169,9 +207,15 @@ class ProvPro
       devices.merge!(YAML::load(STDIN))
     end
 
+    status_start("Validating input")
     devices.each_pair {|udid, name| validate(udid, name)}
-    
-    app_id = Plist::parse_xml('Info.plist')["CFBundleIdentifier"] unless noprov
+    status_end()
+
+    if not noprov
+      status_start("Getting App Id")
+      app_id = Plist::parse_xml('Info.plist')["CFBundleIdentifier"] unless noprov
+      status_end("#{app_id}")
+    end
 
     @agent = WWW::Mechanize.new
     login(username, password)
