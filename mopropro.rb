@@ -196,7 +196,7 @@ class MoProPro
     # else
     
     file = @agent.click(download_link)
-    file.save
+    file.save_as(file.filename) # Overwrites if exists
     status_end("Got it!")
 
     STDOUT << "Saved new provisioning profile to '#{file.filename}'\n"    
