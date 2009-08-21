@@ -6,9 +6,9 @@ require 'mechanize'
 require 'yaml'
 require 'plist'
 
-SETTINGS_FILE = '.provpro'
+SETTINGS_FILE = '.mopropro'
 
-class ProvPro
+class MoProPro
 
   # Since the website only uses JavaScript for validation(!), we need do this
   # ourselves
@@ -313,4 +313,4 @@ class ProvPro
   end
 end
 
-ProvPro.new(ARGV)
+MoProPro.new(ARGV)
