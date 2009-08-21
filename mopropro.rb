@@ -78,9 +78,10 @@ class MoProPro
 
   def add_devices(devices)
     if (devices.size == 0)
-    status_start("No new devices to be added")
-    status_end("")
-    return
+      status_start("No new devices to be added")
+      status_end("")
+      return
+    end
 
     status_start("Adding #{devices.size} device#{devices.size == 1 ? "" : "s"}")
 
