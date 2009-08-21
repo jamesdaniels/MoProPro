@@ -1,10 +1,5 @@
 #!/usr/bin/env ruby
 
-# TODO
-# - Create a new provisioning profile
-#   - Wait for the new profile to be generated
-#   - Download the profile
-
 require 'rubygems'
 require 'optparse'
 require 'mechanize'
@@ -18,11 +13,11 @@ class ProvPro
   # Since the website only uses JavaScript for validation(!), we need do this
   # ourselves
   def validate(udid, name)
-    if not name =~ /[\w\d ]+/
+    if not name.match(/^[a-z\d ]+$/i)
       puts "Error: name can only contain alphanumeric characters and spaces (but is: '#{name}')"
       exit
     end
-    if not udid =~ /[a-fA-F\d]{40}/
+    if not udid.match(/^[a-f\d]{40}$/i)
       puts "Error: UDID must be a 40 character hexadecimal string (but is: '#{udid}')"
       exit
     end
@@ -53,7 +48,40 @@ class ProvPro
     status_end()
   end
 
+  def filter_devices(devices)
+    status_start("Looking up existing devices")
+    
+    device_page = @agent.get("https://developer.apple.com/iphone/manage/devices/index.action")
+
+    existing_names = []
+    device_page.root.search('td.name span').each do |name|
+      existing_names << name.content
+    end
+
+    existing_udids = []
+    device_page.root.search('td.id').each do |id|
+      existing_udids << id.content
+    end
+
+    filtered_devices = devices.reject do |udid, name|
+      idx = existing_udids.index(udid)
+      if not idx.nil?
+        substatus("Warning: Device UDID #{udid} already exists, with name '#{existing_names[idx]}'.")
+        true
+      end
+    end
+
+    status_end("Done.")
+
+    filtered_devices
+  end
+
   def add_devices(devices)
+    if (devices.size == 0)
+    status_start("No new devices to be added")
+    status_end("")
+    return
+
     status_start("Adding #{devices.size} device#{devices.size == 1 ? "" : "s"}")
 
     add_device_page = @agent.get("https://developer.apple.com/iphone/manage/devices/add.action")
@@ -140,7 +168,7 @@ class ProvPro
   
   def retrieve_new_profile(profile)
     status_start("Waiting a bit while the new profile is generated")
-    sleep 2
+    sleep 3
     status_end
 
     status_start("Trying to retrieve new profile")
@@ -272,7 +300,8 @@ class ProvPro
     begin
       @agent = WWW::Mechanize.new
       login(username, password)
-      add_devices(devices)
+      filtered_devices = filter_devices(devices)
+      add_devices(filtered_devices)
       if not noprov
         profile = modify_provisioning_profile(app_id, devices)
         error("No matching Ad Hoc provisioning profile found") if not profile
