@@ -45,7 +45,7 @@ class ProvPro
       # After a succesful login we need to touch the login page again to establish a session
       # If we find the login form on this page, the login was not succesful
        if not @agent.get(login_url).forms.find { |f| f.name == form_name }.nil?
-         STDERR << "Error: invalid credentials\n"
+         error("Invalid credentials")
          exit
        end
     end
@@ -69,24 +69,29 @@ class ProvPro
     status_end("Submitted.")
   end
 
-  def modify_provisioning_profile(app_id, devices)
-    status_start("Looking up provisioning profile")
-
+  def get_profiles_with_link(matching)
     profiles_page = @agent.get("http://developer.apple.com/iphone/manage/provisioningprofiles/viewDistributionProfiles.action")
     profiles = []
     # Names
     profiles_page.root.search('td.profile span').each_with_index do |span,i|
-      profiles[i] = { :name => span.content }
+      profiles[i] = {:name => span.content}
     end
     # Bundle identifiers (without seed)
     profiles_page.root.search('td.appid').each_with_index do |appid,i| 
       profiles[i].merge!({:app_id => appid.content.sub(/^[\w\d]+\./, '')})
     end
     # Edit links
-    profiles_page.links_with(:text => 'Modify').each_with_index do |link,i|
-      profiles[i].merge!({:edit_link => link})
+    profiles_page.links_with(matching).each_with_index do |link,i|
+      profiles[i].merge!({:link => link})
     end
 
+    profiles
+  end
+
+  def modify_provisioning_profile(app_id, devices)
+    status_start("Looking up provisioning profile")
+
+    profiles = get_profiles_with_link(:text => 'Modify')
     substatus("Found #{profiles.size} profile#{profiles.size == 1 ? "" : "s"}")
 
     # Try to find exact matches
@@ -111,36 +116,79 @@ class ProvPro
 
     # Visit each of the matching profiles until we find an Ad Hoc profile
     matching_profiles.each do |profile|
-      edit_page = @agent.click(profile[:edit_link])
+      edit_page = @agent.click(profile[:link])
       form = edit_page.form_with(:name => "saveDistribution")
       # Check if this is an Ad Hoc profile
       if form.radiobutton_with(:value => "limited").checked
+        # Fix a hidden input, normally done by JavaScript
+        form["distributionMethod"] = "limited"
+        substatus("Found Ad Hoc profile")
+        substatus("Adding devices")
         devices.each_key do |udid|
           form.checkbox_with(:value => udid).checked = true
         end
-        p form
-        # form.submit
-        return # TODO
+        status_start("Saving profile with new devices")
+        form.submit
+        status_end()
+        
+        # Return the profile we adjusted.  It will get a new link, but we can
+        # use the name and app_id to match the right one
+        return profile
       end
-      # p edit_page
     end
+  end
+  
+  def retrieve_new_profile(profile)
+    status_start("Waiting a bit while the new profile is generated")
+    sleep 2
+    status_end
 
-    # TODO: Error if no matching profile was found
+    status_start("Trying to retrieve new profile")
+
+    for try in 1..3
+      profiles = get_profiles_with_link(:href => /download.action/)
+      if profiles[-1].has_key?(:link)
+        break
+      else
+        seconds = (try * 2) ** 2
+        substatus("Pending, trying again after #{seconds} seconds")
+        sleep seconds
+      end
+    end
+    
+    error("Still pending, bailing out.  Sorry!") if not profiles[-1].has_key?(:link)
+    # else
+    
+    download_link = profiles.collect do |pr| 
+      pr[:link] if pr[:name] == profile[:name] && pr[:app_id] == profile[:app_id]
+    end.compact.first
+
+    error("No matching profile found?  Bailing out, sorry!") if not download_link
+    # else
+    
+    file = @agent.click(download_link)
+    file.save
+    status_end("Got it!")
+
+    STDOUT << "Saved new provisioning profile to '#{file.filename}'\n"    
   end
 
-  def error_usage(error)
+  def error(message)
     STDERR << "Error: "
-    STDERR << error
-    STDERR << "\n\n"
-    STDERR << @optparser.help
+    STDERR << message
+    STDERR << "\n"
     exit
+  end
+
+  def error_usage(message)
+    error(message << "\n\n" << @optparser.help)
   end
 
   def status_start(message)
     return if not @verbose
-    STDOUT << message
-    STDOUT << "... "
+    STDOUT << message << "... "
     STDOUT.flush
+    @status_open = true
   end
 
   def status_end(message = "Ok.")
@@ -148,13 +196,15 @@ class ProvPro
     STDOUT << message
     STDOUT << "\n"
     STDOUT.flush
+    @status_open = false
   end
 
   def substatus(message)
     return if not @verbose
-    STDOUT << "\n - "
-    STDOUT << message
+    STDOUT << "\n" if @status_open
+    STDOUT << " - " << message << "\n"
     STDOUT.flush
+    @status_open = false
   end
 
   def initialize(args)
@@ -163,6 +213,8 @@ class ProvPro
     password = settings["password"]
     noprov   = settings["provisioning"]
     @verbose = settings["verbose"]
+
+    @status_open = false
 
     @optparser = OptionParser.new do |opts|
       opts.banner += " UDID name\n\n" + 
@@ -217,10 +269,18 @@ class ProvPro
       status_end("#{app_id}")
     end
 
-    @agent = WWW::Mechanize.new
-    login(username, password)
-    add_devices(devices)
-    modify_provisioning_profile(app_id, devices) unless noprov
+    begin
+      @agent = WWW::Mechanize.new
+      login(username, password)
+      add_devices(devices)
+      if not noprov
+        profile = modify_provisioning_profile(app_id, devices)
+        error("No matching Ad Hoc provisioning profile found") if not profile
+        retrieve_new_profile(profile)
+      end
+    rescue WWW::Mechanize::ResponseCodeError => ex
+      error("HTTP #{ex.message}")
+    end
   end
 end
 
