@@ -1,6 +1,6 @@
 # MoProPro
 
-Add devices to mobile provisioning profiles from the command-line!
+Add devices to iPhone mobile provisioning profiles from the command-line!
 
 ## Motivation
 
