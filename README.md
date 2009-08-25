@@ -32,7 +32,7 @@ tool that you run from your project directory.
     Usage: mopropro [options] UDID name
     
     You must provide credentials, either through the command line options
-    or in a YAML file named '.mopropro'
+    or in a YAML file (in the current working directory) named '.mopropro'
     
     You can also use stdin to provide multiple device entries
     For example: 'cat devices.yml | mopropro'
@@ -60,7 +60,7 @@ tool that you run from your project directory.
 ### Using a config file
 
 For the same result as above, but without having to type your password, create
-a YAML `.mopropro` file with
+a YAML `.mopropro` file in the current working directory with
 
     username: user
     password: passwd
