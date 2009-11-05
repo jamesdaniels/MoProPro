@@ -241,6 +241,7 @@ class MoProPro
     username = settings["username"]
     password = settings["password"]
     noprov   = settings["provisioning"]
+    app_id   = settings["appid"]
     @verbose = settings["verbose"]
 
     @status_open = false
@@ -254,8 +255,9 @@ class MoProPro
                     "You can also use stdin to provide multiple device entries\n" +
                     "For example: 'cat devices.yml | #{opts.program_name}'\n\n" +
 
-                    "This program will look for an Info.plist file in the current directory\n" +
-                    "to get the app identifier from (unless you specify --no-provisioning)\n\n"
+                    "This program will look for an *Info.plist file in the current directory\n" +
+                    "to get the app identifier from (unless you specify it with --appid or\n" +
+                    "use --no-provisioning)\n\n"
 
       opts.on("-u", "--username USERNAME", "ADC Username") do |u|
         username = u
@@ -263,6 +265,10 @@ class MoProPro
     
       opts.on("-p", "--password PASSWORD", "ADC Password") do |p|
         password = p
+      end
+
+      opts.on("-a", "--appid APPID", "App ID") do |a|
+        app_id = a
       end
 
       opts.on("--no-provisioning", "Do not create a provisioning profile, only add devices") do |np|
@@ -278,8 +284,24 @@ class MoProPro
     
     error_usage("No username or password provided") if username.nil? || password.nil?
     error_usage("Not enough arguments")             if args.size != 2 && STDIN.tty?
-    error_usage("No Info.plist file found")         unless noprov || File.exist?('Info.plist')
     # else
+  
+    if not noprov
+      status_start("Getting App Id")
+    
+      # Try to find App Id in an Info.plist file
+      if app_id.nil?
+        info_plists = Dir.glob('*Info.plist');
+        error_usage("No *Info.plist file found") if info_plists.empty?
+        # else
+        info_plists.each do |info_plist|
+          app_id = Plist::parse_xml(info_plist)["CFBundleIdentifier"] if app_id.nil?
+        end
+      end
+      error_usage("No App ID found") if app_id.nil?
+      # else
+      status_end("#{app_id}")
+    end
 
     devices = {} 
     devices[args[0]] = args[1] if args.size == 2
@@ -291,12 +313,6 @@ class MoProPro
     status_start("Validating input")
     devices.each_pair {|udid, name| validate(udid, name)}
     status_end()
-
-    if not noprov
-      status_start("Getting App Id")
-      app_id = Plist::parse_xml('Info.plist')["CFBundleIdentifier"] unless noprov
-      status_end("#{app_id}")
-    end
 
     begin
       @agent = WWW::Mechanize.new
