@@ -5,6 +5,7 @@ require 'optparse'
 require 'mechanize'
 require 'yaml'
 require 'plist'
+require 'ruby-debug'
 
 SETTINGS_FILE = '.mopropro'
 
@@ -86,7 +87,7 @@ class MoProPro
     status_start("Adding #{devices.size} device#{devices.size == 1 ? "" : "s"}")
 
     add_device_page = @agent.get("https://developer.apple.com/iphone/manage/devices/add.action")
-    page = add_device_page.form_with(:name => "save") do |form|
+    page = add_device_page.form_with(:name => "add") do |form|
       index = 0
       devices.each_pair{ |udid, name|
         form["deviceNameList[#{index}]"]   = name
@@ -146,7 +147,7 @@ class MoProPro
     # Visit each of the matching profiles until we find an Ad Hoc profile
     matching_profiles.each do |profile|
       edit_page = @agent.click(profile[:link])
-      form = edit_page.form_with(:name => "saveDistribution")
+      form = edit_page.form_with(:name => "save")
       # Check if this is an Ad Hoc profile
       if form.radiobutton_with(:value => "limited").checked
         # Fix a hidden input, normally done by JavaScript
