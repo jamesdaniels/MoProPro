@@ -31,7 +31,9 @@ class MoProPro
     form_name = 'appleConnectForm'
     
     @agent.get(login_url) do |login_page|
-     
+    
+			
+
       # Submit the login form
       login_page.form_with(:name => form_name ) do |form|
         form["theAccountName"] = username
@@ -316,7 +318,7 @@ class MoProPro
     status_end()
 
     begin
-      @agent = WWW::Mechanize.new
+      @agent = Mechanize.new
       login(username, password)
       filtered_devices = filter_devices(devices)
       add_devices(filtered_devices)
@@ -325,7 +327,7 @@ class MoProPro
         error("No matching Ad Hoc provisioning profile found") if not profile
         retrieve_new_profile(profile)
       end
-    rescue WWW::Mechanize::ResponseCodeError => ex
+    rescue Mechanize::ResponseCodeError => ex
       error("HTTP #{ex.message}")
     end
   end
