@@ -120,11 +120,30 @@ class MoProPro
     profiles
   end
 
+	def list_profiles(cert)
+
+		profiles_page = @agent.get("http://developer.apple.com/iphone/manage/provisioningprofiles/viewDistributionProfiles.action")
+		profiles = get_profiles_with_link(:text => 'Modify')
+
+		profiles.map do |profile| 
+			if cert
+				profile_page = @agent.get(profiles_page.link_with(:text => profile[:name]).href)
+				certificates = Nokogiri::HTML(profile_page.content).xpath("//span[.='Certificates']/../..//table//td").map(&:text)
+				certificates.include?(cert) && profile || nil
+			else
+				p[:app_id]
+			end
+		end.compact
+
+	end
+
   def modify_provisioning_profile(app_id, devices)
     status_start("Looking up provisioning profile")
 
     profiles = get_profiles_with_link(:text => 'Modify')
     substatus("Found #{profiles.size} profile#{profiles.size == 1 ? "" : "s"}")
+
+		profiles.map{|p| p[:app_id] } #debugger
 
     # Try to find exact matches
     matching_profiles = profiles.find_all do |profile|
@@ -245,7 +264,10 @@ class MoProPro
     password = settings["password"]
     noprov   = settings["provisioning"]
     app_id   = settings["appid"]
+		cert     = settings["certificate"]
     @verbose = settings["verbose"]
+
+		list = false
 
     @status_open = false
 
@@ -265,7 +287,15 @@ class MoProPro
       opts.on("-u", "--username USERNAME", "ADC Username") do |u|
         username = u
       end
+
+			opts.on('-l', '--list', 'List available App IDs') do |l|
+				list = true
+			end
     
+			opts.on('-c', '--certificate CERTIFICATE', 'Restrict apps to a certain certificate') do |c|
+				cert = c
+			end
+
       opts.on("-p", "--password PASSWORD", "ADC Password") do |p|
         password = p
       end
@@ -284,12 +314,12 @@ class MoProPro
     end
     
     @optparser.parse!(args)
-    
+
     error_usage("No username or password provided") if username.nil? || password.nil?
-    error_usage("Not enough arguments")             if args.size != 2 && STDIN.tty?
+    error_usage("Not enough arguments")             if !list && args.size != 2 && STDIN.tty?
     # else
   
-    if not noprov
+    if !list and not noprov
       status_start("Getting App Id")
     
       # Try to find App Id in an Info.plist file
@@ -306,27 +336,35 @@ class MoProPro
       status_end("#{app_id}")
     end
 
-    devices = {} 
-    devices[args[0]] = args[1] if args.size == 2
+		unless list
 
-    if not STDIN.tty?
-      devices.merge!(YAML::load(STDIN))
-    end
+			devices = {}
+			devices[args[0]] = args[1] if args.size == 2
 
-    status_start("Validating input")
-    devices.each_pair {|udid, name| validate(udid, name)}
-    status_end()
+			if not STDIN.tty?
+				devices.merge!(YAML::load(STDIN))
+			end
+
+			status_start("Validating input")
+			devices.each_pair {|udid, name| validate(udid, name)}
+			status_end()
+
+		end
 
     begin
       @agent = Mechanize.new
       login(username, password)
-      filtered_devices = filter_devices(devices)
-      add_devices(filtered_devices)
-      if not noprov
-        profile = modify_provisioning_profile(app_id, devices)
-        error("No matching Ad Hoc provisioning profile found") if not profile
-        retrieve_new_profile(profile)
-      end
+			if list
+				puts list_profiles(cert).map{|p| p[:app_id]}.join(' ')
+			else
+				filtered_devices = filter_devices(devices)
+				add_devices(filtered_devices)
+				if not noprov
+					profile = modify_provisioning_profile(app_id, devices)
+					error("No matching Ad Hoc provisioning profile found") if not profile
+					retrieve_new_profile(profile)
+				end
+			end
     rescue Mechanize::ResponseCodeError => ex
       error("HTTP #{ex.message}")
     end
