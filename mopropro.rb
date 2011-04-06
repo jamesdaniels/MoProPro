@@ -143,8 +143,6 @@ class MoProPro
     profiles = get_profiles_with_link(:text => 'Modify')
     substatus("Found #{profiles.size} profile#{profiles.size == 1 ? "" : "s"}")
 
-		profiles.map{|p| p[:app_id] } #debugger
-
     # Try to find exact matches
     matching_profiles = profiles.find_all do |profile|
       profile[:app_id] == app_id
