@@ -5,7 +5,6 @@ require 'optparse'
 require 'mechanize'
 require 'yaml'
 require 'plist'
-require 'ruby-debug'
 
 SETTINGS_FILE = '.mopropro'
 
